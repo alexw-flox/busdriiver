@@ -1,5 +1,8 @@
 from enum import Enum
 from random import shuffle
+import logging
+
+LOGGER = logging.getLogger('bd')
 
 
 class Suit(Enum):
@@ -16,6 +19,9 @@ class Direction(Enum):
     LOWER = 0
     HIGHER = 1
 
+    def __str__(self):
+        return self.name
+
 
 class Card:
     def __init__(self, suit, rank):
@@ -24,7 +30,7 @@ class Card:
         self.suit = suit
         self.rank = rank
     def __repr__(self):
-        return '({}, {})'.format(str(self.suit.name), str(self.rank))
+        return '({}, {})'.format(str(self.suit.name), str(self.rank + 1))
 
     # only compare on rank, as per busdriver game
     def __gt__(self, other):
@@ -56,12 +62,20 @@ class Busgame:
         self.deck = Deck()
         self.strat = strat
         self.lanes = [[self.deck.draw_card()] for i in range(5)]
+        LOGGER.debug(self.lanes)
+        
+        for lane in self.lanes:
+            self.strat.log_seen(lane[0])
         self.curr_lane = 0
 
     def draw(self):
         drawn = self.deck.draw_card()
+        LOGGER.debug('Got {}'.format(drawn))
+        self.strat.log_seen(drawn)
+        return drawn
 
-    def action(self, direction):
+    def cross_lane(self, direction):
+        LOGGER.debug('Aim  {} !'.format(direction))
         drawn = self.draw()
         lane_card = self.lanes[self.curr_lane][-1]
 
@@ -81,31 +95,70 @@ class Busgame:
         # catch all
         return False
 
+    def query_strat(self, lane_card):
+        return self.strat.gen_action(lane_card)
+
+    def attempt_oneshot_drive(self, verbose=False):
+        res = True
+        while res: 
+            if self.curr_lane == 5:
+                # full success
+                return True
+            selected_direction = self.query_strat(self.lanes[self.curr_lane][-1])
+            res = self.cross_lane(selected_direction) 
+
+        # catch all
+        return False
 
 class Strat:
     def __init__(self):
         self.seen = [0 for i in range(13)]
-
-    def load_starting(self, starting):
-        for lane in starting:
-            r = lane[0].rank
-            self.seen[r] += 1
+        self.total_drawn = 0
         
     def log_seen(self, drawn):
-        self.seen += [drawn]
+        self.seen[drawn.rank] += 1
+        self.total_drawn += 1
 
-    def action(self, lane_card):
+    def gen_action(self, lane_card):
         # given a lane card, decide on an appropriate direction
         # this can be done by just checking the history of seen
         # cards and selecting the direction with fewer seen
-        return Direction.LOWER
+        LOGGER.debug(str(self.seen))
+
+        under_acc = 0
+        for i in range(lane_card.rank):
+            under_acc += self.seen[i]
+        on_acc = self.seen[lane_card.rank]
+        over_acc = self.total_drawn - (under_acc + on_acc)
+
+        under_total = lane_card.rank * 4
+        over_total = 48 - under_total
+
+        if (under_total - under_acc) > (over_total - over_acc):
+            return Direction.LOWER
+        else:
+            return Direction.HIGHER
 
 
 def main():
-    b = Busgame(None)
-    s = Strat()
-    print(b.lanes)
-    s.load_starting(b.lanes)
+    logging.basicConfig(level=logging.INFO)
+    
+    tot = 0
+    wins = 0
+    for i in range(1000000):
+        strat = Strat()
+        busgame = Busgame(strat)
+        res = busgame.attempt_oneshot_drive()
+        
+        # bookkeeping
+        tot += 1
+        if res:
+            wins += 1
+
+        outcome = 'SUCCESS' if res else 'FAILURE'
+            
+        logging.info('Run resulted in {}. (Winrate: {}/{}, {})'.format(outcome, wins, tot, round(100 * wins/tot, 3)))
+
     
 
 if __name__=='__main__':

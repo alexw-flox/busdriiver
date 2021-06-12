@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     entry_points={
         'console_scripts': [
-            'busdriver = busdriver:main',
+            'busdriver = busdriver.driver:main',
         ],
     }
 )
